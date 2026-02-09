@@ -1,0 +1,40 @@
+# Virtual environment
+env/
+venv/
+.venv/
+
+# Git
+.git/
+.gitignore
+
+# Frontend (separado)
+frontend/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Local database
+db.sqlite3
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Temp files
+*.tmp
+*.bak
+temp_fix.txt
+*.backup
+*.backup2
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
