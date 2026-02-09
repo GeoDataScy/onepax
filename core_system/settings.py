@@ -25,7 +25,12 @@ SECRET_KEY = 'django-insecure-2-6y3y%y6+_8!1-bd^!_s*f+56=1mf8m#*z6d+h(sgr4k)bub+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    'onepax-onepax.7y6zlt.easypanel.host',
+    '.easypanel.host',
+    'localhost',
+    '127.0.0.1',
+]
 
 
 # Application definition
