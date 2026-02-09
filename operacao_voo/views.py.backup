@@ -1,0 +1,190 @@
+from django.shortcuts import render, get_object_or_404
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from django.utils import timezone
+from .models import Embarque, Desembarque
+from controle_acesso.models import Catraca, EventoCatraca
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ESTADOS GLOBAIS
+VOO_EMBARQUE_ATIVO = {"ativo": False, "inicio": None, "id_voo": None}
+VOO_DESEMBARQUE_ATIVO = {"ativo": False, "inicio": None, "id_voo": None}
+
+def embarque_view(request):
+    return render(request, 'operacao_voo/embarque.html')
+
+# --- CONTROLE GLOBAL ---
+
+@csrf_exempt
+@require_POST
+def api_iniciar_embarque(request):
+    """ Inicia o cronómetro do voo globalmente """
+    VOO_EMBARQUE_ATIVO["ativo"] = True
+    if not VOO_EMBARQUE_ATIVO["inicio"]:
+        VOO_EMBARQUE_ATIVO["inicio"] = timezone.now()
+    
+    logger.info("Estado de Voo de Embarque definido como ATIVO.")
+    return JsonResponse({"status": "success", "message": "Voo de Embarque Ativado no Sistema."})
+
+@csrf_exempt
+@require_POST
+def api_parar_embarque(request):
+    """ Para o cronómetro do voo e desativa todas as catracas de embarque """
+    VOO_EMBARQUE_ATIVO["ativo"] = False
+    VOO_EMBARQUE_ATIVO["inicio"] = None
+    
+    Catraca.objects.filter(tipo='EMBARQUE').update(push_ativo=False)
+    
+    logger.info("Voo Encerrado. Todas as catracas de embarque foram bloqueadas.")
+    return JsonResponse({"status": "success", "message": "Embarque Encerrado globalmente."})
+
+# --- CONTROLE INDIVIDUAL (O que os botões do Front usam agora) ---
+
+# operacao_voo/views.py
+
+# ... (Mantenha os imports e variáveis globais)
+
+@csrf_exempt
+@require_POST
+def api_toggle_catraca_push(request, device_id, action):
+    """ 
+    ESTA É A FUNÇÃO DO BOTÃO HABILITAR:
+    1. Ativa o hardware (push_ativo).
+    2. RESETA o contador (inicio_contagem) para 'agora'.
+    """
+    catraca = get_object_or_404(Catraca, identificador=device_id)
+
+    if action == "enable":
+        # Resetamos o marco zero da catraca para o momento do clique
+        catraca.inicio_contagem = timezone.now()
+        catraca.push_ativo = True
+        catraca.save()
+        
+        # Garante que o estado global do embarque está ativo
+        VOO_EMBARQUE_ATIVO["ativo"] = True
+        if not VOO_EMBARQUE_ATIVO["inicio"]:
+            VOO_EMBARQUE_ATIVO["inicio"] = timezone.now()
+            
+        msg = f"Catraca {device_id} Habilitada e Contador Resetado."
+    else:
+        catraca.push_ativo = False
+        catraca.save()
+        msg = f"Catraca {device_id} Desativada."
+
+    logger.info(msg)
+    return JsonResponse({"status": "success", "message": msg})
+
+def api_total_embarcados_por_catraca(request, device_id):
+    """
+    CONTAGEM SEGREGADA: 
+    Só conta giros após o 'inicio_contagem' individual de cada catraca.
+    """
+    catraca = get_object_or_404(Catraca, identificador=device_id)
+    
+    # Se o voo não está ativo globalmente, retorna 0
+    if not VOO_EMBARQUE_ATIVO["ativo"]:
+        return JsonResponse({"total_embarcados": 0})
+
+    # CONTA APENAS GIROS DESTA CATRACA APÓS O RESET DELA
+    total = EventoCatraca.objects.filter(
+        catraca=catraca,
+        timestamp__gte=catraca.inicio_contagem # <--- AQUI ESTÁ O PULO DO GATO
+    ).count()
+    
+    return JsonResponse({"total_embarcados": total})
+
+# ... (Mantenha as outras funções de salvar e desembarque)
+
+@csrf_exempt
+@require_POST
+def api_salvar_embarque(request):
+    try:
+        data = json.loads(request.body)
+        flight_number = data.get('numeroVoo') or data.get('flight_number')
+        if not flight_number:
+            return JsonResponse({"status": "error", "message": "Número do Voo obrigatório"}, status=400)
+        
+        # Lógica de criação do registro no banco
+        novo_voo = Embarque.objects.create(
+            flight_number=flight_number,
+            aeronave=data.get('aeronave'),
+            operadora=data.get('operadorAereo') or data.get('operadora'),
+            departure_date=(data.get('dataEmbarque') or '')[:10],
+            departure_time=data.get('horaEmbarque'),
+            platform=data.get('plataforma'),
+            icao=data.get('icao'),
+            cliente_final=data.get('clienteFinal'),
+            passengers_boarded=data.get('passengers_boarded', 0),
+            observacao=data.get('observacoes', '')
+        )
+        return JsonResponse({"status": "success", "message": f"Voo {flight_number} salvo com sucesso!"})
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=500)
+
+# --- DESEMBARQUE ---
+
+@csrf_exempt
+@require_POST
+def api_iniciar_desembarque(request):
+    VOO_DESEMBARQUE_ATIVO["ativo"] = True
+    VOO_DESEMBARQUE_ATIVO["inicio"] = timezone.now()
+    return JsonResponse({"status": "success", "message": "Desembarque Iniciado."})
+
+@csrf_exempt
+@require_POST
+def api_parar_desembarque(request):
+    VOO_DESEMBARQUE_ATIVO["ativo"] = False
+    VOO_DESEMBARQUE_ATIVO.update({"inicio": None})
+    return JsonResponse({"status": "success", "message": "Desembarque Encerrado."})
+
+def api_total_desembarcados(request):
+    if not VOO_DESEMBARQUE_ATIVO["ativo"] or not VOO_DESEMBARQUE_ATIVO["inicio"]:
+        return JsonResponse({"total_desembarcados": 0})
+    total = EventoCatraca.objects.filter(catraca__tipo='DESEMBARQUE', timestamp__gte=VOO_DESEMBARQUE_ATIVO["inicio"]).count()
+    return JsonResponse({"total_desembarcados": total})def api_total_desembarcados_por_catraca(request, device_id):
+    '''
+    CONTAGEM SEGREGADA POR CATRACA DE DESEMBARQUE:
+    S� conta giros ap�s o 'inicio_contagem' individual de cada catraca.
+    '''
+    catraca = get_object_or_404(Catraca, identificador=device_id)
+    
+    # Se o voo n�o est� ativo globalmente, retorna 0
+    if not VOO_DESEMBARQUE_ATIVO['ativo']:
+        return JsonResponse({'total_desembarcados': 0})
+
+    # CONTA APENAS GIROS DESTA CATRACA AP�S O RESET DELA
+    total = EventoCatraca.objects.filter(
+        catraca=catraca,
+        timestamp__gte=catraca.inicio_contagem
+    ).count()
+    
+    return JsonResponse({'total_desembarcados': total})
+
+@csrf_exempt
+@require_POST
+def api_salvar_desembarque(request):
+    try:
+        data = json.loads(request.body)
+        flight_number = data.get('numeroVoo') or data.get('flight_number')
+        if not flight_number:
+            return JsonResponse({'status': 'error', 'message': 'N�mero do Voo obrigat�rio'}, status=400)
+        
+        # Criar registro de desembarque
+        novo_voo = Desembarque.objects.create(
+            flight_number=flight_number,
+            aeronave=data.get('aeronave'),
+            operadora=data.get('operadorAereo') or data.get('operadora'),
+            arrival_date=(data.get('dataEmbarque') or '')[:10],
+            arrival_time=data.get('horaEmbarque'),
+            origin=data.get('plataforma'),
+            cliente_final=data.get('clienteFinal'),
+            passengers_disembarked=data.get('passengers_boarded', 0),
+            observacao=data.get('observacoes', '')
+        )
+        return JsonResponse({'status': 'success', 'message': f'Voo {flight_number} de desembarque salvo com sucesso!'})
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)

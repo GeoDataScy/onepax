@@ -1,0 +1,118 @@
+====================================================================================================
+📊 TABELAS DO BANCO DE DADOS PAXONE
+====================================================================================================
+
+Total de tabelas: 15
+
+1. auth_group
+   └─ Registros: 0
+
+2. auth_group_permissions
+   └─ Registros: 0
+
+3. auth_permission
+   └─ Registros: 40
+
+4. auth_user
+   └─ Registros: 1
+
+5. auth_user_groups
+   └─ Registros: 0
+
+6. auth_user_user_permissions
+   └─ Registros: 0
+
+7. controle_acesso_catraca
+   └─ Registros: 3
+
+8. controle_acesso_eventocatraca
+   └─ Registros: 61
+
+9. django_admin_log
+   └─ Registros: 7
+
+10. django_content_type
+   └─ Registros: 10
+
+11. django_migrations
+   └─ Registros: 21
+
+12. django_session
+   └─ Registros: 2
+
+13. operacao_voo_desembarque
+   └─ Registros: 0
+
+14. operacao_voo_embarque
+   └─ Registros: 6
+
+15. sqlite_sequence
+   └─ Registros: 9
+
+====================================================================================================
+
+📋 DETALHES DAS TABELAS PRINCIPAIS:
+
+
+🔹 Tabela: controle_acesso_catraca
+----------------------------------------------------------------------------------------------------
+PK   ID    Nome do Campo                       Tipo                 Null       Default        
+----------------------------------------------------------------------------------------------------
+🔑    0     id                                  INTEGER              NOT NULL   -              
+     1     nome                                varchar(50)          NOT NULL   -              
+     2     identificador                       varchar(50)          NOT NULL   -              
+     3     ip                                  char(39)             NULL       -              
+     4     tipo                                varchar(20)          NOT NULL   -              
+     5     push_ativo                          bool                 NOT NULL   -              
+     6     inicio_contagem                     datetime             NOT NULL   -              
+
+
+🔹 Tabela: controle_acesso_eventocatraca
+----------------------------------------------------------------------------------------------------
+PK   ID    Nome do Campo                       Tipo                 Null       Default        
+----------------------------------------------------------------------------------------------------
+🔑    0     id                                  INTEGER              NOT NULL   -              
+     1     timestamp                           datetime             NOT NULL   -              
+     2     sentido                             varchar(20)          NULL       -              
+     3     raw_data                            TEXT                 NULL       -              
+     4     catraca_id                          bigint               NOT NULL   -              
+
+
+🔹 Tabela: operacao_voo_desembarque
+----------------------------------------------------------------------------------------------------
+PK   ID    Nome do Campo                       Tipo                 Null       Default        
+----------------------------------------------------------------------------------------------------
+🔑    0     id                                  INTEGER              NOT NULL   -              
+     1     flight_number                       varchar(20)          NOT NULL   -              
+     2     aeronave                            varchar(10)          NOT NULL   -              
+     3     operadora                           varchar(100)         NOT NULL   -              
+     4     arrival_date                        date                 NOT NULL   -              
+     5     arrival_time                        time                 NOT NULL   -              
+     6     origin                              varchar(100)         NOT NULL   -              
+     7     cliente_final                       varchar(50)          NOT NULL   -              
+     8     passengers_disembarked              INTEGER              NOT NULL   -              
+     9     observacao                          TEXT                 NULL       -              
+     10    created_at                          datetime             NOT NULL   -              
+
+
+🔹 Tabela: operacao_voo_embarque
+----------------------------------------------------------------------------------------------------
+PK   ID    Nome do Campo                       Tipo                 Null       Default        
+----------------------------------------------------------------------------------------------------
+🔑    0     id                                  INTEGER              NOT NULL   -              
+     1     flight_number                       varchar(20)          NOT NULL   -              
+     2     aeronave                            varchar(10)          NOT NULL   -              
+     3     operadora                           varchar(100)         NOT NULL   -              
+     4     departure_date                      date                 NOT NULL   -              
+     5     departure_time                      time                 NOT NULL   -              
+     6     platform                            varchar(50)          NOT NULL   -              
+     7     icao                                varchar(10)          NOT NULL   -              
+     8     cliente_final                       varchar(50)          NOT NULL   -              
+     9     passengers_boarded                  INTEGER              NOT NULL   -              
+     10    observacao                          TEXT                 NULL       -              
+     11    created_at                          datetime             NOT NULL   -              
+
+
+✅ Análise concluída!
+
+📄 Resultado salvo em: c:\PaxOne\tabelas_banco.txt

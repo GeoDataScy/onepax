@@ -1,0 +1,66 @@
+﻿    ).count()
+    
+    return JsonResponse({'total_embarcados': total})
+
+@csrf_exempt
+@require_POST
+def api_salvar_embarque(request):
+    try:
+        data = json.loads(request.body)
+        flight_number = data.get('numeroVoo') or data.get('flight_number')
+        if not flight_number:
+            return JsonResponse({"status": "error", "message": "Número do Voo obrigatório"}, status=400)
+        
+        # Dados do voo
+        departure_date = (data.get('dataEmbarque') or '')[:10]
+        departure_time = data.get('horaEmbarque')
+        catraca_id = data.get('catraca_id', '1001')
+        passageiros = data.get('passengers_boarded', 0)
+        
+        # Buscar voo existente
+        voo_existente = Embarque.objects.filter(
+            flight_number=flight_number,
+            departure_date=departure_date,
+            departure_time=departure_time
+        ).first()
+        
+        if voo_existente:
+            # ATUALIZAR voo existente
+            if catraca_id == '1001':
+                voo_existente.passageiros_catraca1 = passageiros
+                voo_existente.catraca1_salvo = True
+            elif catraca_id == '1002':
+                voo_existente.passageiros_catraca2 = passageiros
+                voo_existente.catraca2_salvo = True
+            
+            voo_existente.passengers_boarded = voo_existente.passageiros_catraca1 + voo_existente.passageiros_catraca2
+            voo_existente.save()
+            
+            return JsonResponse({"status": "success", "message": f"Voo {flight_number} atualizado! Total: {voo_existente.passengers_boarded} passageiros"})
+        else:
+            # CRIAR novo voo
+            novo_voo = Embarque.objects.create(
+                flight_number=flight_number,
+                aeronave=data.get('aeronave'),
+                operadora=data.get('operadorAereo'),
+                departure_date=departure_date,
+                departure_time=departure_time,
+                platform=data.get('plataforma'),
+                icao=data.get('icao'),
+                cliente_final=data.get('clienteFinal'),
+                passageiros_catraca1=passageiros if catraca_id == '1001' else 0,
+                passageiros_catraca2=passageiros if catraca_id == '1002' else 0,
+                passengers_boarded=passageiros,
+                observacao=data.get('observacoes', ''),
+                catraca1_salvo=(catraca_id == '1001'),
+                catraca2_salvo=(catraca_id == '1002')
+            )
+            return JsonResponse({"status": "success", "message": f"Voo {flight_number} salvo!"})
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=500)
+
+# --- DESEMBARQUE ---
+
+@csrf_exempt
+@require_POST
+def api_iniciar_desembarque(request):
