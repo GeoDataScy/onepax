@@ -17,7 +17,6 @@ RUN apt-get update && apt-get install -y \
 # Copiar requirements e instalar dependências Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir gunicorn
 
 # Copiar código do projeto
 COPY . .
@@ -29,4 +28,4 @@ RUN python manage.py collectstatic --noinput || true
 EXPOSE 8000
 
 # Comando para rodar o servidor
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "core_system.wsgi:application"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "--preload", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "debug", "core_system.wsgi:application"]
