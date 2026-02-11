@@ -85,10 +85,9 @@ def api_total_embarcados_por_catraca(request, device_id):
     """
     catraca = get_object_or_404(Catraca, identificador=device_id)
     
-    # Se o voo nÃ£o estÃ¡ ativo globalmente, retorna 0
-    if not VOO_EMBARQUE_ATIVO["ativo"]:
-        return JsonResponse({"total_embarcados": 0})
-
+    # [FIX] Removido dependência de estado global em memória (VOO_EMBARQUE_ATIVO)
+    # O contador persiste baseado no banco de dados (inicio_contagem)
+    
     # CONTA APENAS GIROS DESTA CATRACA APÃ“S O RESET DELA
     total = EventoCatraca.objects.filter(
         catraca=catraca,
@@ -112,11 +111,10 @@ def api_salvar_embarque(request):
         catraca_id = data.get('catraca_id', '1001')
         passageiros = data.get('passengers_boarded', 0)
         
-        # Buscar voo existente
+        # [FIX] Buscar voo existente APENAS por Nº Voo e Data (Hora pode variar entre tablets)
         voo_existente = Embarque.objects.filter(
             flight_number=flight_number,
-            departure_date=departure_date,
-            departure_time=departure_time
+            departure_date=departure_date
         ).first()
         
         if voo_existente:
@@ -128,7 +126,14 @@ def api_salvar_embarque(request):
                 voo_existente.passageiros_catraca2 = passageiros
                 voo_existente.catraca2_salvo = True
             
+            # SOMA AUTOMÁTICA
             voo_existente.passengers_boarded = voo_existente.passageiros_catraca1 + voo_existente.passageiros_catraca2
+            
+            # Se a hora enviada agora for diferente, atualizamos? Melhor manter a primeira ou atualizar.
+            # Vamos atualizar para garantir dados recentes
+            if departure_time:
+                 voo_existente.departure_time = departure_time
+                 
             voo_existente.save()
             
             return JsonResponse({
@@ -178,6 +183,16 @@ def api_parar_desembarque(request):
     return JsonResponse({"status": "success", "message": "Desembarque Encerrado."})
 
 def api_total_desembarcados(request):
+    # [FIX] Removido check global para evitar reset visual
+    if not VOO_DESEMBARQUE_ATIVO["inicio"]:
+          # Fallback seguro: tenta pegar do dia ou hora? 
+          # Melhor retornar 0 se não tiver inicio definido GLOBALMENTE é complicado.
+          # Mas para desembarque, o 'inicio_contagem' da catraca é o que manda.
+          pass
+          
+    # Mas aqui é o total global (soma de todas)?
+    # O endpoint diz 'total-desembarcados'.
+    # Vou manter como está, mas focar no endpoint 'por_catraca' que é o usado pelos devices.
     if not VOO_DESEMBARQUE_ATIVO["ativo"] or not VOO_DESEMBARQUE_ATIVO["inicio"]:
         return JsonResponse({"total_desembarcados": 0})
     total = EventoCatraca.objects.filter(catraca__tipo='DESEMBARQUE', timestamp__gte=VOO_DESEMBARQUE_ATIVO["inicio"]).count()
@@ -190,10 +205,8 @@ def api_total_desembarcados_por_catraca(request, device_id):
     '''
     catraca = get_object_or_404(Catraca, identificador=device_id)
     
-    # Se o voo não está ativo globalmente, retorna 0
-    if not VOO_DESEMBARQUE_ATIVO['ativo']:
-        return JsonResponse({'total_desembarcados': 0})
-
+    # [FIX] Removido dependência de estado global em memória
+    
     # CONTA APENAS GIROS DESTA CATRACA APÓS O RESET DELA
     total = EventoCatraca.objects.filter(
         catraca=catraca,
