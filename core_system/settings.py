@@ -47,7 +47,11 @@ INSTALLED_APPS = [
     # --- NOSSOS APPS ---
     'corsheaders',
     'operacao_voo',      # Dados de Voo (Embarque, Desembarque, Van)
-    'controle_acesso',   # Hardware (Catracas, PUSH, Contadores)
+    'controle_acesso',   # Hardware (Catracas, PUSH, Contadores) + UserProfile
+    'sala_briefing',     # Sala de Briefing (role: supervisor)
+    'transporte',        # Transporte (role: supervisor)
+    'area_supervisor',   # Área do Supervisor (role: supervisor)
+    'central_analise',   # Central de Análise (role: superintendente)
     'rest_framework',    # API
     'rest_framework_simplejwt',  # JWT Authentication
 ]
