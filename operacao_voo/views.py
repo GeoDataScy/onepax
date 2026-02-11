@@ -227,3 +227,36 @@ def api_salvar_desembarque(request):
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
+
+# =========================================================
+# 3. VIEWS GENÉRICAS PARA CRUD (Supervisor)
+# =========================================================
+from rest_framework import generics
+from rest_framework.permissions import IsAuthenticated
+from .serializers import EmbarqueSerializer, DesembarqueSerializer
+from controle_acesso.permissions import IsSupervisor
+
+class EmbarqueListCreateView(generics.ListCreateAPIView):
+    """Lista todos os embarques ou cria um novo (via API padrão)"""
+    queryset = Embarque.objects.all().order_by('-departure_date', '-departure_time')
+    serializer_class = EmbarqueSerializer
+    permission_classes = [IsAuthenticated]
+
+class EmbarqueDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Detalhes, Edição e Remoção de um embarque (Apenas Supervisor)"""
+    queryset = Embarque.objects.all()
+    serializer_class = EmbarqueSerializer
+    permission_classes = [IsAuthenticated, IsSupervisor]
+
+class DesembarqueListCreateView(generics.ListCreateAPIView):
+    """Lista todos os desembarques ou cria um novo"""
+    queryset = Desembarque.objects.all().order_by('-arrival_date', '-arrival_time')
+    serializer_class = DesembarqueSerializer
+    permission_classes = [IsAuthenticated]
+
+class DesembarqueDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Detalhes, Edição e Remoção de um desembarque (Apenas Supervisor)"""
+    queryset = Desembarque.objects.all()
+    serializer_class = DesembarqueSerializer
+    permission_classes = [IsAuthenticated, IsSupervisor]
+

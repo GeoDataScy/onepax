@@ -19,4 +19,10 @@ urlpatterns = [
     path('salvar-desembarque/', views.api_salvar_desembarque, name='salvar_desemb'),
     path('api/total-desembarcados/', views.api_total_desembarcados, name='total_desemb'),
     path('api/total-desembarcados/<str:device_id>/', views.api_total_desembarcados_por_catraca, name='total_desemb_por_catraca'),
+    
+    # ROTAS CRUD (SUPERVISOR AREA)
+    path('api/embarque/', views.EmbarqueListCreateView.as_view(), name='embarque_list_create'),
+    path('api/embarque/<int:pk>/', views.EmbarqueDetailView.as_view(), name='embarque_detail'),
+    path('api/desembarque/', views.DesembarqueListCreateView.as_view(), name='desembarque_list_create'),
+    path('api/desembarque/<int:pk>/', views.DesembarqueDetailView.as_view(), name='desembarque_detail'),
 ]
