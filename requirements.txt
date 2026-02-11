@@ -7,6 +7,6 @@ psycopg2-binary==2.9.11
 PyJWT==2.11.0
 sqlparse==0.5.4
 tzdata==2025.3
-gunicorn==20.1.0
+gunicorn==23.0.0
 whitenoise==6.7.0
 setuptools  # Required for gunicorn (pkg_resources)
