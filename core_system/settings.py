@@ -32,6 +32,11 @@ ALLOWED_HOSTS = [
     '127.0.0.1',
 ]
 
+CSRF_TRUSTED_ORIGINS = [
+    'https://onepax-onepax.7y6zlt.easypanel.host',
+    'https://onepax.vercel.app', 
+]
+
 
 # Application definition
 # core_system/settings.py
