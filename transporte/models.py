@@ -1,22 +1,34 @@
 from django.db import models
-from django.utils import timezone
 
 
 class RegistroTransporte(models.Model):
     """
-    Placeholder para registros de transporte.
-    Será expandido conforme requisitos futuros.
+    Registro de Transporte.
+    Cada registro representa uma solicitação de transporte.
     """
-    descricao = models.CharField(max_length=200, verbose_name="Descrição")
-    origem = models.CharField(max_length=100, verbose_name="Origem")
-    destino = models.CharField(max_length=100, verbose_name="Destino")
-    data_transporte = models.DateTimeField(default=timezone.now, verbose_name="Data do Transporte")
+    empresa_solicitante = models.CharField(max_length=100, verbose_name="Empresa que Solicita", default='')
+    cliente_final = models.CharField(max_length=100, verbose_name="Cliente Final", default='')
+    data = models.DateField(verbose_name="Data", null=True)
+    numero_voo = models.IntegerField(verbose_name="Número do Voo", default=0)
+    prefixo_aeronave = models.CharField(max_length=50, verbose_name="Prefixo da Aeronave", default='', blank=True)
+    prefixo_manual = models.CharField(
+        max_length=50,
+        verbose_name="Prefixo Manual",
+        default='',
+        blank=True,
+        help_text="Preencher somente se o campo Prefixo da Aeronave não for informado"
+    )
+    horario = models.TimeField(verbose_name="Horário", null=True)
+    servico = models.CharField(max_length=200, verbose_name="Serviço", default='')
+
+    # Controle interno
     criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
 
     class Meta:
         verbose_name = "Registro de Transporte"
         verbose_name_plural = "Registros de Transporte"
-        ordering = ['-data_transporte']
+        ordering = ['-data', '-horario']
 
     def __str__(self):
-        return f"Transporte: {self.origem} → {self.destino} — {self.data_transporte.strftime('%d/%m/%Y %H:%M')}"
+        data_str = self.data.strftime('%d/%m/%Y') if self.data else 'Sem data'
+        return f"Transporte Voo {self.numero_voo} — {self.empresa_solicitante} — {data_str}"

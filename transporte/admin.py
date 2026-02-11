@@ -4,6 +4,6 @@ from .models import RegistroTransporte
 
 @admin.register(RegistroTransporte)
 class RegistroTransporteAdmin(admin.ModelAdmin):
-    list_display = ('descricao', 'origem', 'destino', 'data_transporte', 'criado_em')
-    list_filter = ('data_transporte',)
-    search_fields = ('descricao', 'origem', 'destino')
+    list_display = ('numero_voo', 'empresa_solicitante', 'cliente_final', 'data', 'horario', 'prefixo_aeronave', 'servico')
+    list_filter = ('empresa_solicitante', 'cliente_final', 'data')
+    search_fields = ('empresa_solicitante', 'cliente_final', 'servico')
