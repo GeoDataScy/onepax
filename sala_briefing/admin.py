@@ -4,6 +4,6 @@ from .models import BriefingSession
 
 @admin.register(BriefingSession)
 class BriefingSessionAdmin(admin.ModelAdmin):
-    list_display = ('titulo', 'data_sessao', 'criado_em')
-    list_filter = ('data_sessao',)
-    search_fields = ('titulo',)
+    list_display = ('numero_voo', 'companhia_aerea', 'cliente_final', 'data', 'horario', 'unidade_maritima', 'servico', 'solicitante')
+    list_filter = ('companhia_aerea', 'cliente_final', 'data')
+    search_fields = ('companhia_aerea', 'cliente_final', 'solicitante', 'servico')
