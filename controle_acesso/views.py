@@ -11,6 +11,17 @@ from .models import Catraca, EventoCatraca
 logger = logging.getLogger(__name__)
 
 
+def _find_catraca_by_device_id(device_id):
+    """
+    Procura a catraca primeiro pelo hardware_id (ID real do ControlID),
+    depois pelo identificador (ID interno do PaxOne como 1001, 1002).
+    """
+    catraca = Catraca.objects.filter(hardware_id=str(device_id)).first()
+    if not catraca:
+        catraca = Catraca.objects.filter(identificador=str(device_id)).first()
+    return catraca
+
+
 # =========================================================
 # 1. EVENTO DE GIRO (/receive/catra_event/)
 #    A catraca envia quando alguém passa (TURN LEFT / TURN RIGHT)
@@ -51,7 +62,7 @@ def receber_evento_catraca(request):
             device_id_recebido = data.get('device_id')
 
             # Procurar a catraca pelo identificador
-            catraca = Catraca.objects.filter(identificador=str(device_id_recebido)).first()
+            catraca = _find_catraca_by_device_id(device_id_recebido)
 
             if not catraca:
                 logger.warning(f"Catraca não cadastrada: {device_id_recebido}")
@@ -120,8 +131,8 @@ def push_handler(request):
         if not device_id:
             return JsonResponse({"status": "no_action"}, status=200)
 
-        # Procurar a catraca pelo identificador
-        catraca = Catraca.objects.filter(identificador=str(device_id)).first()
+        # Procurar a catraca (hardware_id ou identificador)
+        catraca = _find_catraca_by_device_id(device_id)
         
         if not catraca or not catraca.push_ativo:
             logger.info(f"[EMBARQUE] Push desativado para device {device_id}")
@@ -211,7 +222,7 @@ def desembarque_push_handler(request):
         if not device_id:
             return JsonResponse({"status": "no_action"}, status=200)
 
-        catraca = Catraca.objects.filter(identificador=str(device_id)).first()
+        catraca = _find_catraca_by_device_id(device_id)
         
         if not catraca or not catraca.push_ativo:
             logger.info(f"[DESEMBARQUE] Push desativado para device {device_id}")

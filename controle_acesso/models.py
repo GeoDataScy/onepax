@@ -53,6 +53,10 @@ class Catraca(models.Model):
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, verbose_name="Tipo de Operação")
     push_ativo = models.BooleanField(default=False, verbose_name="PUSH Ativo?")
     
+    # ID real do hardware ControlID (ex: 4408801109327046)
+    # Separado do 'identificador' que o front-end usa (ex: 1001)
+    hardware_id = models.CharField(max_length=50, blank=True, null=True, unique=True, verbose_name="ID Hardware ControlID")
+    
     # NOVO CAMPO: Marco zero individual da catraca
     inicio_contagem = models.DateTimeField(default=timezone.now, verbose_name="Início da Contagem Atual")
     
