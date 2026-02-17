@@ -55,6 +55,12 @@ class Catraca(models.Model):
     
     # NOVO CAMPO: Marco zero individual da catraca
     inicio_contagem = models.DateTimeField(default=timezone.now, verbose_name="Início da Contagem Atual")
+    
+    # Controle do protocolo PUSH (anti-spam de 5 segundos)
+    last_command_time = models.DateTimeField(null=True, blank=True, verbose_name="Último Comando PUSH")
+    
+    # Anti-rebote: último evento de giro registrado (evita duplicatas)
+    last_event_time = models.DateTimeField(null=True, blank=True, verbose_name="Último Evento de Giro")
 
     def __str__(self):
         return f"{self.nome} ({self.tipo}) - {self.identificador}"
