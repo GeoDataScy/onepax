@@ -10,6 +10,7 @@ class BriefingSession(models.Model):
     companhia_aerea = models.CharField(max_length=100, verbose_name="Companhia Aérea", default='')
     cliente_final = models.CharField(max_length=100, verbose_name="Cliente Final", default='')
     data = models.DateField(verbose_name="Data", null=True)
+    prefixo_aeronave = models.CharField(max_length=50, verbose_name="Prefixo da Aeronave", default='', blank=True)
     numero_voo = models.IntegerField(verbose_name="Número do Voo", default=0)
     unidade_maritima = models.CharField(max_length=100, verbose_name="Unidade Marítima", default='')
     horario = models.TimeField(verbose_name="Horário", null=True)
