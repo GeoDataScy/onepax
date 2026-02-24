@@ -66,6 +66,18 @@ class Catraca(models.Model):
     # Anti-rebote: último evento de giro registrado (evita duplicatas)
     last_event_time = models.DateTimeField(null=True, blank=True, verbose_name="Último Evento de Giro")
 
+    # Sentido de liberação configurável por catraca (depende da instalação física)
+    SENTIDO_CHOICES = [
+        ('anticlockwise', 'Anti-Horário (Padrão Embarque)'),
+        ('clockwise', 'Horário'),
+    ]
+    sentido_liberacao = models.CharField(
+        max_length=20,
+        choices=SENTIDO_CHOICES,
+        default='anticlockwise',
+        verbose_name="Sentido de Liberação"
+    )
+
     def __str__(self):
         return f"{self.nome} ({self.tipo}) - {self.identificador}"
 

@@ -6,6 +6,7 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 import json
 import logging
+import threading
 import requests
 from .models import Catraca, EventoCatraca
 
@@ -179,13 +180,15 @@ def push_handler(request):
             logger.info(f"[EMBARQUE] Comando recente para {device_id}. Ignorando.")
             return JsonResponse({"status": "no_action"}, status=200)
 
-        # Comando de liberação: EMBARQUE = anticlockwise (igual à AWS)
+        # Sentido configurável por catraca (anticlockwise padrão, clockwise para instalações invertidas)
+        sentido = catraca.sentido_liberacao
+
         response_data = {
             "verb": "POST",
             "endpoint": "execute_actions",
             "body": {
                 "actions": [
-                    {"action": "catra", "parameters": "allow=anticlockwise"}
+                    {"action": "catra", "parameters": f"allow={sentido}"}
                 ]
             },
             "contentType": "application/json",
@@ -195,11 +198,12 @@ def push_handler(request):
         catraca.last_command_time = now()
         catraca.save()
 
-        # Comando direto (abordagem ativa): se IP cadastrado, libera imediatamente
+        # Comando direto em thread separada para não bloquear a resposta ao frontend
         if catraca.ip:
-            liberar_agora(catraca.ip, "anticlockwise")
+            t = threading.Thread(target=liberar_agora, args=(catraca.ip, sentido), daemon=True)
+            t.start()
 
-        logger.info(f"[EMBARQUE] Comando de liberação enviado para {device_id}")
+        logger.info(f"[EMBARQUE] Comando '{sentido}' enviado para {device_id} (IP: {catraca.ip})")
         return JsonResponse(response_data, status=200)
 
     return JsonResponse({"error": "Método não permitido"}, status=405)
@@ -273,13 +277,15 @@ def desembarque_push_handler(request):
             logger.info(f"[DESEMBARQUE] Comando recente para {device_id}. Ignorando.")
             return JsonResponse({"status": "no_action"}, status=200)
 
-        # Comando de liberação: DESEMBARQUE = clockwise (igual à AWS)
+        # Sentido configurável por catraca
+        sentido = catraca.sentido_liberacao
+
         response_data = {
             "verb": "POST",
             "endpoint": "execute_actions",
             "body": {
                 "actions": [
-                    {"action": "catra", "parameters": "allow=clockwise"}
+                    {"action": "catra", "parameters": f"allow={sentido}"}
                 ]
             },
             "contentType": "application/json",
@@ -289,11 +295,12 @@ def desembarque_push_handler(request):
         catraca.last_command_time = now()
         catraca.save()
 
-        # Comando direto (abordagem ativa): se IP cadastrado, libera imediatamente
+        # Comando direto em thread separada para não bloquear a resposta ao frontend
         if catraca.ip:
-            liberar_agora(catraca.ip, "clockwise")
+            t = threading.Thread(target=liberar_agora, args=(catraca.ip, sentido), daemon=True)
+            t.start()
 
-        logger.info(f"[DESEMBARQUE] Comando de liberação enviado para {device_id}")
+        logger.info(f"[DESEMBARQUE] Comando '{sentido}' enviado para {device_id} (IP: {catraca.ip})")
         return JsonResponse(response_data, status=200)
 
     return JsonResponse({"error": "Método não permitido"}, status=405)
