@@ -6,9 +6,45 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 import json
 import logging
+import requests
 from .models import Catraca, EventoCatraca
 
 logger = logging.getLogger(__name__)
+
+# Credenciais padrão da Control iD
+USERNAME_CATRA = "admin"
+PASSWORD_CATRA = "admin"
+
+
+# =========================================================
+# FUNÇÕES DE COMANDO DIRETO (ABORDAGEM ATIVA)
+# =========================================================
+
+def get_catraca_session(ip):
+    """Autentica na catraca e retorna o token de sessão."""
+    try:
+        url = f"http://{ip}/login.fcgi"
+        payload = {"login": USERNAME_CATRA, "password": PASSWORD_CATRA}
+        response = requests.post(url, json=payload, timeout=5)
+        return response.json().get("session")
+    except Exception as e:
+        logger.error(f"Erro de login no IP {ip}: {e}")
+        return None
+
+
+def liberar_agora(ip, sentido="anticlockwise"):
+    """Envia o comando POST direto para abrir a catraca imediatamente."""
+    session = get_catraca_session(ip)
+    if not session:
+        return False
+    try:
+        url = f"http://{ip}/execute_actions.fcgi?session={session}"
+        payload = {"actions": [{"action": "catra", "parameters": f"allow={sentido}"}]}
+        response = requests.post(url, json=payload, timeout=5)
+        return response.status_code == 200
+    except Exception as e:
+        logger.error(f"Erro ao comandar catraca {ip}: {e}")
+        return False
 
 
 def _find_catraca_by_device_id(device_id):
@@ -159,6 +195,10 @@ def push_handler(request):
         catraca.last_command_time = now()
         catraca.save()
 
+        # Comando direto (abordagem ativa): se IP cadastrado, libera imediatamente
+        if catraca.ip:
+            liberar_agora(catraca.ip, "anticlockwise")
+
         logger.info(f"[EMBARQUE] Comando de liberação enviado para {device_id}")
         return JsonResponse(response_data, status=200)
 
@@ -185,7 +225,7 @@ def result_handler(request):
             logger.info(f"[EMBARQUE] Resultado recebido do device {device_id}: {data}")
 
             # Atualizar last_command_time da catraca
-            catraca = Catraca.objects.filter(identificador=str(device_id)).first()
+            catraca = _find_catraca_by_device_id(device_id)
             if catraca:
                 catraca.last_command_time = now()
                 catraca.save()
@@ -249,6 +289,10 @@ def desembarque_push_handler(request):
         catraca.last_command_time = now()
         catraca.save()
 
+        # Comando direto (abordagem ativa): se IP cadastrado, libera imediatamente
+        if catraca.ip:
+            liberar_agora(catraca.ip, "clockwise")
+
         logger.info(f"[DESEMBARQUE] Comando de liberação enviado para {device_id}")
         return JsonResponse(response_data, status=200)
 
@@ -276,7 +320,7 @@ def desembarque_result_handler(request):
             logger.info(f"[DESEMBARQUE] Resultado recebido do device {device_id}: {data}")
 
             # Atualizar last_command_time da catraca
-            catraca = Catraca.objects.filter(identificador=str(device_id)).first()
+            catraca = _find_catraca_by_device_id(device_id)
             if catraca:
                 catraca.last_command_time = now()
                 catraca.save()
