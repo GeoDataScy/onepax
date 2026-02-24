@@ -33,13 +33,11 @@ def api_iniciar_embarque(request):
 @csrf_exempt
 @require_POST
 def api_parar_embarque(request):
-    """ Para o cronÃ³metro do voo e desativa todas as catracas de embarque """
+    """ Para o estado global do voo. Cada catraca é desativada individualmente pelo frontend. """
     VOO_EMBARQUE_ATIVO["ativo"] = False
     VOO_EMBARQUE_ATIVO["inicio"] = None
-    
-    Catraca.objects.filter(tipo='EMBARQUE').update(push_ativo=False)
-    
-    logger.info("Voo Encerrado. Todas as catracas de embarque foram bloqueadas.")
+
+    logger.info("Estado global de embarque encerrado.")
     return JsonResponse({"status": "success", "message": "Embarque Encerrado globalmente."})
 
 # --- CONTROLE INDIVIDUAL (O que os botÃµes do Front usam agora) ---
@@ -183,19 +181,16 @@ def api_parar_desembarque(request):
     return JsonResponse({"status": "success", "message": "Desembarque Encerrado."})
 
 def api_total_desembarcados(request):
-    # [FIX] Removido check global para evitar reset visual
-    if not VOO_DESEMBARQUE_ATIVO["inicio"]:
-          # Fallback seguro: tenta pegar do dia ou hora? 
-          # Melhor retornar 0 se não tiver inicio definido GLOBALMENTE é complicado.
-          # Mas para desembarque, o 'inicio_contagem' da catraca é o que manda.
-          pass
-          
-    # Mas aqui é o total global (soma de todas)?
-    # O endpoint diz 'total-desembarcados'.
-    # Vou manter como está, mas focar no endpoint 'por_catraca' que é o usado pelos devices.
-    if not VOO_DESEMBARQUE_ATIVO["ativo"] or not VOO_DESEMBARQUE_ATIVO["inicio"]:
-        return JsonResponse({"total_desembarcados": 0})
-    total = EventoCatraca.objects.filter(catraca__tipo='DESEMBARQUE', timestamp__gte=VOO_DESEMBARQUE_ATIVO["inicio"]).count()
+    """
+    Total global de desembarque somando todas as catracas de desembarque
+    a partir do inicio_contagem individual de cada uma (persistido em DB).
+    """
+    total = 0
+    for catraca in Catraca.objects.filter(tipo='DESEMBARQUE'):
+        total += EventoCatraca.objects.filter(
+            catraca=catraca,
+            timestamp__gte=catraca.inicio_contagem
+        ).count()
     return JsonResponse({"total_desembarcados": total})
 
 def api_total_desembarcados_por_catraca(request, device_id):
