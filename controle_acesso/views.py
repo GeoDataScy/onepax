@@ -198,12 +198,10 @@ def push_handler(request):
         catraca.last_command_time = now()
         catraca.save()
 
-        # Comando direto em thread separada para não bloquear a resposta ao frontend
-        if catraca.ip:
-            t = threading.Thread(target=liberar_agora, args=(catraca.ip, sentido), daemon=True)
-            t.start()
-
-        logger.info(f"[EMBARQUE] Comando '{sentido}' enviado para {device_id} (IP: {catraca.ip})")
+        # NOTA: liberar_agora (comando direto ao IP da catraca) não funciona em ambiente cloud
+        # pois o IP da catraca é privado (rede local). O protocolo de polling é o que funciona:
+        # a própria catraca faz GET em /push/ e recebe este JSON como resposta de comando.
+        logger.info(f"[EMBARQUE] Comando '{sentido}' enviado para {device_id}")
         return JsonResponse(response_data, status=200)
 
     return JsonResponse({"error": "Método não permitido"}, status=405)
@@ -295,12 +293,7 @@ def desembarque_push_handler(request):
         catraca.last_command_time = now()
         catraca.save()
 
-        # Comando direto em thread separada para não bloquear a resposta ao frontend
-        if catraca.ip:
-            t = threading.Thread(target=liberar_agora, args=(catraca.ip, sentido), daemon=True)
-            t.start()
-
-        logger.info(f"[DESEMBARQUE] Comando '{sentido}' enviado para {device_id} (IP: {catraca.ip})")
+        logger.info(f"[DESEMBARQUE] Comando '{sentido}' enviado para {device_id}")
         return JsonResponse(response_data, status=200)
 
     return JsonResponse({"error": "Método não permitido"}, status=405)
