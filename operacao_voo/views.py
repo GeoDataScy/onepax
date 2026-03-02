@@ -22,7 +22,7 @@ def embarque_view(request):
 @csrf_exempt
 @require_POST
 def api_iniciar_embarque(request):
-    """ Inicia o cronÃ³metro do voo globalmente """
+    """ Inicia o cronômetro do voo globalmente """
     VOO_EMBARQUE_ATIVO["ativo"] = True
     if not VOO_EMBARQUE_ATIVO["inicio"]:
         VOO_EMBARQUE_ATIVO["inicio"] = timezone.now()
@@ -40,58 +40,62 @@ def api_parar_embarque(request):
     logger.info("Estado global de embarque encerrado.")
     return JsonResponse({"status": "success", "message": "Embarque Encerrado globalmente."})
 
-# --- CONTROLE INDIVIDUAL (O que os botÃµes do Front usam agora) ---
-
-# operacao_voo/views.py
-
-# ... (Mantenha os imports e variÃ¡veis globais)
+# --- CONTROLE INDIVIDUAL ---
 
 @csrf_exempt
 @require_POST
 def api_toggle_catraca_push(request, device_id, action):
-    """ 
-    ESTA Ã‰ A FUNÃ‡ÃƒO DO BOTÃƒO HABILITAR:
-    1. Ativa o hardware (push_ativo).
-    2. RESETA o contador (inicio_contagem) para 'agora'.
+    """
+    Controle individual de cada catraca.
+    
+    enable → Liga o push E reseta o contador (botão "Liberar Passageiro")
+    reset  → SÓ reseta o contador, NÃO liga o push (botão "Habilitar Catraca")
+    disable → Desliga o push (botão "Encerrar Voo")
     """
     catraca = get_object_or_404(Catraca, identificador=device_id)
 
     if action == "enable":
-        # Resetamos o marco zero da catraca para o momento do clique
+        # Liga o push E reseta last_command_time para forçar verde imediato
         catraca.inicio_contagem = timezone.now()
         catraca.push_ativo = True
+        catraca.last_command_time = None  # força a catraca ficar verde no próximo poll
         catraca.save()
-        
-        # Garante que o estado global do embarque estÃ¡ ativo
+
+        # Garante que o estado global do embarque está ativo
         VOO_EMBARQUE_ATIVO["ativo"] = True
         if not VOO_EMBARQUE_ATIVO["inicio"]:
             VOO_EMBARQUE_ATIVO["inicio"] = timezone.now()
-            
-        msg = f"Catraca {device_id} Habilitada e Contador Resetado."
-    else:
+
+        msg = f"Catraca {device_id} liberada - ficará verde em até 5 segundos."
+
+    elif action == "reset":
+        # SÓ zera o contador — NÃO liga o push, catraca NÃO fica verde
+        catraca.inicio_contagem = timezone.now()
+        catraca.save()
+
+        msg = f"Catraca {device_id} habilitada - contador zerado para novo voo."
+
+    else:  # disable
         catraca.push_ativo = False
         catraca.save()
-        msg = f"Catraca {device_id} Desativada."
+
+        msg = f"Catraca {device_id} desativada."
 
     logger.info(msg)
     return JsonResponse({"status": "success", "message": msg})
 
 def api_total_embarcados_por_catraca(request, device_id):
     """
-    CONTAGEM SEGREGADA: 
-    SÃ³ conta giros apÃ³s o 'inicio_contagem' individual de cada catraca.
+    CONTAGEM SEGREGADA:
+    Só conta giros após o 'inicio_contagem' individual de cada catraca.
     """
     catraca = get_object_or_404(Catraca, identificador=device_id)
-    
-    # [FIX] Removido dependência de estado global em memória (VOO_EMBARQUE_ATIVO)
-    # O contador persiste baseado no banco de dados (inicio_contagem)
-    
-    # CONTA APENAS GIROS DESTA CATRACA APÃ“S O RESET DELA
+
     total = EventoCatraca.objects.filter(
         catraca=catraca,
-        timestamp__gte=catraca.inicio_contagem # <--- AQUI ESTÃ O PULO DO GATO
+        timestamp__gte=catraca.inicio_contagem
     ).count()
-    
+
     return JsonResponse({'total_embarcados': total})
 
 @csrf_exempt
@@ -102,45 +106,38 @@ def api_salvar_embarque(request):
         flight_number = data.get('numeroVoo') or data.get('flight_number')
         if not flight_number:
             return JsonResponse({"status": "error", "message": "Número do Voo obrigatório"}, status=400)
-        
-        # Dados do voo
+
         departure_date = (data.get('dataEmbarque') or '')[:10]
         departure_time = data.get('horaEmbarque')
         catraca_id = data.get('catraca_id', '1001')
         passageiros = data.get('passengers_boarded', 0)
-        
-        # [FIX] Buscar voo existente APENAS por Nº Voo e Data (Hora pode variar entre tablets)
+
         voo_existente = Embarque.objects.filter(
             flight_number=flight_number,
             departure_date=departure_date
         ).first()
-        
+
         if voo_existente:
-            # ATUALIZAR voo existente
             if catraca_id == '1001':
                 voo_existente.passageiros_catraca1 = passageiros
                 voo_existente.catraca1_salvo = True
             elif catraca_id == '1002':
                 voo_existente.passageiros_catraca2 = passageiros
                 voo_existente.catraca2_salvo = True
-            
-            # SOMA AUTOMÁTICA
+
             voo_existente.passengers_boarded = voo_existente.passageiros_catraca1 + voo_existente.passageiros_catraca2
-            
-            # Se a hora enviada agora for diferente, atualizamos? Melhor manter a primeira ou atualizar.
-            # Vamos atualizar para garantir dados recentes
+
             if departure_time:
-                 voo_existente.departure_time = departure_time
-                 
+                voo_existente.departure_time = departure_time
+
             voo_existente.save()
-            
+
             return JsonResponse({
                 "status": "success",
                 "total_passageiros": voo_existente.passengers_boarded,
                 "consolidado": voo_existente.catraca1_salvo and voo_existente.catraca2_salvo
             })
         else:
-            # CRIAR novo voo
             novo_voo = Embarque.objects.create(
                 flight_number=flight_number,
                 aeronave=data.get('aeronave'),
@@ -194,20 +191,17 @@ def api_total_desembarcados(request):
     return JsonResponse({"total_desembarcados": total})
 
 def api_total_desembarcados_por_catraca(request, device_id):
-    '''
+    """
     CONTAGEM SEGREGADA POR CATRACA DE DESEMBARQUE:
     Só conta giros após o 'inicio_contagem' individual de cada catraca.
-    '''
+    """
     catraca = get_object_or_404(Catraca, identificador=device_id)
-    
-    # [FIX] Removido dependência de estado global em memória
-    
-    # CONTA APENAS GIROS DESTA CATRACA APÓS O RESET DELA
+
     total = EventoCatraca.objects.filter(
         catraca=catraca,
         timestamp__gte=catraca.inicio_contagem
     ).count()
-    
+
     return JsonResponse({'total_desembarcados': total})
 
 @csrf_exempt
@@ -218,8 +212,7 @@ def api_salvar_desembarque(request):
         flight_number = data.get('numeroVoo') or data.get('flight_number')
         if not flight_number:
             return JsonResponse({'status': 'error', 'message': 'Número do Voo obrigatório'}, status=400)
-        
-        # Criar registro de desembarque
+
         novo_voo = Desembarque.objects.create(
             flight_number=flight_number,
             aeronave=data.get('aeronave'),
@@ -237,7 +230,7 @@ def api_salvar_desembarque(request):
 
 
 # =========================================================
-# 3. VIEWS GENÉRICAS PARA CRUD (Supervisor)
+# VIEWS GENÉRICAS PARA CRUD (Supervisor)
 # =========================================================
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
@@ -245,26 +238,21 @@ from .serializers import EmbarqueSerializer, DesembarqueSerializer
 from controle_acesso.permissions import IsSupervisor
 
 class EmbarqueListCreateView(generics.ListCreateAPIView):
-    """Lista todos os embarques ou cria um novo (via API padrão)"""
     queryset = Embarque.objects.all().order_by('-departure_date', '-departure_time')
     serializer_class = EmbarqueSerializer
     permission_classes = [IsAuthenticated]
 
 class EmbarqueDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """Detalhes, Edição e Remoção de um embarque (Apenas Supervisor)"""
     queryset = Embarque.objects.all()
     serializer_class = EmbarqueSerializer
     permission_classes = [IsAuthenticated, IsSupervisor]
 
 class DesembarqueListCreateView(generics.ListCreateAPIView):
-    """Lista todos os desembarques ou cria um novo"""
     queryset = Desembarque.objects.all().order_by('-arrival_date', '-arrival_time')
     serializer_class = DesembarqueSerializer
     permission_classes = [IsAuthenticated]
 
 class DesembarqueDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """Detalhes, Edição e Remoção de um desembarque (Apenas Supervisor)"""
     queryset = Desembarque.objects.all()
     serializer_class = DesembarqueSerializer
     permission_classes = [IsAuthenticated, IsSupervisor]
-
