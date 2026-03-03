@@ -34,8 +34,15 @@ ALLOWED_HOSTS = [
 
 CSRF_TRUSTED_ORIGINS = [
     'https://onepax-onepax.7y6zlt.easypanel.host',
-    'https://onepax.vercel.app', 
+    'http://onepax-onepax.7y6zlt.easypanel.host',
+    'https://onepax.vercel.app',
+    'http://onepax.vercel.app',
 ]
+
+# Permitir funcionamento via HTTP (catracas em rede local)
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+SECURE_SSL_REDIRECT = False
 
 
 # Application definition
