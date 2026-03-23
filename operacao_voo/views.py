@@ -220,6 +220,7 @@ def api_salvar_desembarque(request):
             arrival_date=(data.get('dataEmbarque') or '')[:10],
             arrival_time=data.get('horaEmbarque'),
             origin=data.get('plataforma'),
+            icao=data.get('icao', ''),
             cliente_final=data.get('clienteFinal'),
             passengers_disembarked=data.get('passengers_boarded', 0),
             observacao=data.get('observacoes', '')

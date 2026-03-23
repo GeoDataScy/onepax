@@ -59,9 +59,12 @@ class Desembarque(models.Model):
     # Origem (No desembarque geralmente é a Origem/Plataforma de onde veio)
     origin = models.CharField(max_length=100, verbose_name="Origem/Plataforma")
 
+    # Localização
+    icao = models.CharField(max_length=10, verbose_name="ICAO", blank=True, default="")
+
     # Dados Comerciais
     cliente_final = models.CharField(max_length=50, verbose_name="Cliente Final")
-    
+
     # Totais
     passengers_disembarked = models.IntegerField(default=0, verbose_name="Passageiros Desembarcados")
     observacao = models.TextField(blank=True, null=True, verbose_name="Observação")
