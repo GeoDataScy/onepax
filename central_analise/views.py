@@ -5,7 +5,8 @@ from controle_acesso.permissions import IsSuperintendente
 from django.conf import settings
 from django.db.models import Sum, Count
 from datetime import date, timedelta
-from django.db.models.functions import TruncMonth, TruncWeek
+from django.db.models.functions import TruncMonth, TruncWeek, TruncDate
+from collections import OrderedDict
 import json
 import logging
 
@@ -571,4 +572,303 @@ def operador_detail(request, operadora):
         'semanal': semanal,
         'anual': anual,
         'rotas': rotas,
+    })
+
+
+# =========================================================
+# DASHBOARD FILTROS
+# =========================================================
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def dashboard_filtros(request):
+    emb_operadoras = set(Embarque.objects.values_list('operadora', flat=True).distinct())
+    des_operadoras = set(Desembarque.objects.values_list('operadora', flat=True).distinct())
+
+    emb_clientes = set(Embarque.objects.values_list('cliente_final', flat=True).distinct())
+    des_clientes = set(Desembarque.objects.values_list('cliente_final', flat=True).distinct())
+
+    emb_icao = set(Embarque.objects.values_list('icao', flat=True).distinct())
+    des_icao = set(Desembarque.objects.values_list('icao', flat=True).distinct())
+
+    emb_aeronaves = set(Embarque.objects.values_list('aeronave', flat=True).distinct())
+    des_aeronaves = set(Desembarque.objects.values_list('aeronave', flat=True).distinct())
+
+    return Response({
+        'operadoras': sorted(emb_operadoras | des_operadoras),
+        'clientes_finais': sorted(emb_clientes | des_clientes),
+        'tipos_icao': sorted(emb_icao | des_icao),
+        'aeronaves': sorted(emb_aeronaves | des_aeronaves),
+    })
+
+
+# =========================================================
+# DASHBOARD PASSAGEIROS
+# =========================================================
+def _parse_multi(value):
+    if not value:
+        return []
+    return [v.strip() for v in value.split(',') if v.strip()]
+
+
+def _apply_dashboard_filters_emb(qs, params):
+    data_inicio = params.get('data_inicio') or str(date.today() - timedelta(days=365))
+    data_fim = params.get('data_fim') or str(date.today())
+    qs = qs.filter(departure_date__gte=data_inicio, departure_date__lte=data_fim)
+
+    operadoras = _parse_multi(params.get('operadora'))
+    if operadoras:
+        qs = qs.filter(operadora__in=operadoras)
+
+    clientes = _parse_multi(params.get('cliente_final'))
+    if clientes:
+        qs = qs.filter(cliente_final__in=clientes)
+
+    aeronaves = _parse_multi(params.get('aeronave'))
+    if aeronaves:
+        qs = qs.filter(aeronave__in=aeronaves)
+
+    return qs
+
+
+def _apply_dashboard_filters_des(qs, params):
+    data_inicio = params.get('data_inicio') or str(date.today() - timedelta(days=365))
+    data_fim = params.get('data_fim') or str(date.today())
+    qs = qs.filter(arrival_date__gte=data_inicio, arrival_date__lte=data_fim)
+
+    operadoras = _parse_multi(params.get('operadora'))
+    if operadoras:
+        qs = qs.filter(operadora__in=operadoras)
+
+    clientes = _parse_multi(params.get('cliente_final'))
+    if clientes:
+        qs = qs.filter(cliente_final__in=clientes)
+
+    aeronaves = _parse_multi(params.get('aeronave'))
+    if aeronaves:
+        qs = qs.filter(aeronave__in=aeronaves)
+
+    return qs
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def dashboard_passageiros(request):
+    params = request.query_params
+    servico = params.get('servico', '')
+
+    emb_qs = _apply_dashboard_filters_emb(Embarque.objects.all(), params)
+    des_qs = _apply_dashboard_filters_des(Desembarque.objects.all(), params)
+
+    include_emb = servico in ('', 'embarque')
+    include_des = servico in ('', 'desembarque')
+
+    # KPIs
+    total_emb_pax = (emb_qs.aggregate(t=Sum('passengers_boarded'))['t'] or 0) if include_emb else 0
+    total_des_pax = (des_qs.aggregate(t=Sum('passengers_disembarked'))['t'] or 0) if include_des else 0
+    total_decolagens = emb_qs.count() if include_emb else 0
+    total_pousos = des_qs.count() if include_des else 0
+
+    # Diario
+    diario_dict = OrderedDict()
+    if include_emb:
+        emb_diario = emb_qs.annotate(
+            dia=TruncDate('departure_date')
+        ).values('dia').annotate(total=Sum('passengers_boarded')).order_by('dia')
+        for row in emb_diario:
+            d = str(row['dia'])
+            diario_dict.setdefault(d, {'date': d, 'embarque': 0, 'desembarque': 0})
+            diario_dict[d]['embarque'] = row['total'] or 0
+
+    if include_des:
+        des_diario = des_qs.annotate(
+            dia=TruncDate('arrival_date')
+        ).values('dia').annotate(total=Sum('passengers_disembarked')).order_by('dia')
+        for row in des_diario:
+            d = str(row['dia'])
+            diario_dict.setdefault(d, {'date': d, 'embarque': 0, 'desembarque': 0})
+            diario_dict[d]['desembarque'] = row['total'] or 0
+
+    diario = sorted(diario_dict.values(), key=lambda x: x['date'])
+
+    # Tabela operadoras
+    op_data = {}
+
+    if include_emb:
+        emb_op = emb_qs.annotate(
+            mes=TruncMonth('departure_date')
+        ).values('operadora', 'mes').annotate(total=Sum('passengers_boarded')).order_by('operadora', 'mes')
+        for row in emb_op:
+            op = row['operadora']
+            mes_str = row['mes'].strftime('%Y-%m')
+            op_data.setdefault(op, {})
+            op_data[op][mes_str] = op_data[op].get(mes_str, 0) + (row['total'] or 0)
+
+    if include_des:
+        des_op = des_qs.annotate(
+            mes=TruncMonth('arrival_date')
+        ).values('operadora', 'mes').annotate(total=Sum('passengers_disembarked')).order_by('operadora', 'mes')
+        for row in des_op:
+            op = row['operadora']
+            mes_str = row['mes'].strftime('%Y-%m')
+            op_data.setdefault(op, {})
+            op_data[op][mes_str] = op_data[op].get(mes_str, 0) + (row['total'] or 0)
+
+    tabela_operadoras = []
+    for op in sorted(op_data.keys()):
+        meses = op_data[op]
+        total_por_ano = {}
+        total_geral = 0
+        for mes_str, val in meses.items():
+            ano = mes_str[:4]
+            total_por_ano[ano] = total_por_ano.get(ano, 0) + val
+            total_geral += val
+        tabela_operadoras.append({
+            'operadora': op,
+            'meses': dict(sorted(meses.items())),
+            'total_por_ano': dict(sorted(total_por_ano.items())),
+            'total_geral': total_geral,
+        })
+
+    return Response({
+        'kpis': {
+            'total_passageiros': total_emb_pax + total_des_pax,
+            'total_decolagens': total_decolagens,
+            'total_pousos': total_pousos,
+        },
+        'diario': diario,
+        'tabela_operadoras': tabela_operadoras,
+    })
+
+
+# =========================================================
+# DASHBOARD OPERACIONAL
+# =========================================================
+def _apply_operacional_filters_emb(qs, params):
+    data_inicio = params.get('data_inicio') or str(date.today().replace(month=1, day=1))
+    data_fim = params.get('data_fim') or str(date.today().replace(month=12, day=31))
+    qs = qs.filter(departure_date__gte=data_inicio, departure_date__lte=data_fim)
+
+    empresas = _parse_multi(params.get('empresa'))
+    if empresas:
+        qs = qs.filter(operadora__in=empresas)
+
+    clientes = _parse_multi(params.get('cliente_final'))
+    if clientes:
+        qs = qs.filter(cliente_final__in=clientes)
+
+    icaos = _parse_multi(params.get('icao'))
+    if icaos:
+        qs = qs.filter(icao__in=icaos)
+
+    return qs
+
+
+def _apply_operacional_filters_des(qs, params):
+    data_inicio = params.get('data_inicio') or str(date.today().replace(month=1, day=1))
+    data_fim = params.get('data_fim') or str(date.today().replace(month=12, day=31))
+    qs = qs.filter(arrival_date__gte=data_inicio, arrival_date__lte=data_fim)
+
+    empresas = _parse_multi(params.get('empresa'))
+    if empresas:
+        qs = qs.filter(operadora__in=empresas)
+
+    clientes = _parse_multi(params.get('cliente_final'))
+    if clientes:
+        qs = qs.filter(cliente_final__in=clientes)
+
+    icaos = _parse_multi(params.get('icao'))
+    if icaos:
+        qs = qs.filter(icao__in=icaos)
+
+    return qs
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def dashboard_operacional(request):
+    params = request.query_params
+
+    emb_qs = _apply_operacional_filters_emb(Embarque.objects.all(), params)
+    des_qs = _apply_operacional_filters_des(Desembarque.objects.all(), params)
+
+    # Unir dados: lista de dicts com (mes, operadora, cliente_final, passageiros, data)
+    emb_by_op_mes = emb_qs.annotate(
+        mes=TruncMonth('departure_date')
+    ).values('operadora', 'mes').annotate(total=Sum('passengers_boarded'))
+
+    des_by_op_mes = des_qs.annotate(
+        mes=TruncMonth('arrival_date')
+    ).values('operadora', 'mes').annotate(total=Sum('passengers_disembarked'))
+
+    # por_empresa_mes
+    empresa_mes = {}
+    for row in emb_by_op_mes:
+        m = row['mes'].strftime('%Y-%m')
+        empresa_mes.setdefault(m, {})
+        empresa_mes[m][row['operadora']] = empresa_mes[m].get(row['operadora'], 0) + (row['total'] or 0)
+    for row in des_by_op_mes:
+        m = row['mes'].strftime('%Y-%m')
+        empresa_mes.setdefault(m, {})
+        empresa_mes[m][row['operadora']] = empresa_mes[m].get(row['operadora'], 0) + (row['total'] or 0)
+
+    por_empresa_mes = [
+        {'mes': m, 'empresas': empresa_mes[m]}
+        for m in sorted(empresa_mes.keys())
+    ]
+
+    # media_diaria_mes
+    dias_pax = {}  # mes -> {dia -> total_pax}
+    emb_diario = emb_qs.annotate(
+        dia=TruncDate('departure_date')
+    ).values('dia').annotate(total=Sum('passengers_boarded'))
+    for row in emb_diario:
+        m = row['dia'].strftime('%Y-%m')
+        d = str(row['dia'])
+        dias_pax.setdefault(m, {})
+        dias_pax[m][d] = dias_pax[m].get(d, 0) + (row['total'] or 0)
+
+    des_diario = des_qs.annotate(
+        dia=TruncDate('arrival_date')
+    ).values('dia').annotate(total=Sum('passengers_disembarked'))
+    for row in des_diario:
+        m = row['dia'].strftime('%Y-%m')
+        d = str(row['dia'])
+        dias_pax.setdefault(m, {})
+        dias_pax[m][d] = dias_pax[m].get(d, 0) + (row['total'] or 0)
+
+    media_diaria_mes = []
+    for m in sorted(dias_pax.keys()):
+        valores = dias_pax[m]
+        total = sum(valores.values())
+        dias_distintos = len(valores)
+        media = round(total / dias_distintos, 1) if dias_distintos else 0
+        media_diaria_mes.append({'mes': m, 'media': media})
+
+    # tabela_clientes
+    cliente_mes = {}
+    emb_by_cli = emb_qs.annotate(
+        mes=TruncMonth('departure_date')
+    ).values('cliente_final', 'mes').annotate(total=Sum('passengers_boarded'))
+    for row in emb_by_cli:
+        m = row['mes'].strftime('%Y-%m')
+        cliente_mes.setdefault(m, {})
+        cliente_mes[m][row['cliente_final']] = cliente_mes[m].get(row['cliente_final'], 0) + (row['total'] or 0)
+
+    des_by_cli = des_qs.annotate(
+        mes=TruncMonth('arrival_date')
+    ).values('cliente_final', 'mes').annotate(total=Sum('passengers_disembarked'))
+    for row in des_by_cli:
+        m = row['mes'].strftime('%Y-%m')
+        cliente_mes.setdefault(m, {})
+        cliente_mes[m][row['cliente_final']] = cliente_mes[m].get(row['cliente_final'], 0) + (row['total'] or 0)
+
+    tabela_clientes = [
+        {'mes': m, 'clientes': cliente_mes[m]}
+        for m in sorted(cliente_mes.keys())
+    ]
+
+    return Response({
+        'por_empresa_mes': por_empresa_mes,
+        'media_diaria_mes': media_diaria_mes,
+        'tabela_clientes': tabela_clientes,
     })
