@@ -112,9 +112,13 @@ def api_salvar_embarque(request):
         catraca_id = data.get('catraca_id', '1001')
         passageiros = data.get('passengers_boarded', 0)
 
+        # Busca registro pendente de consolidação (ainda falta uma catraca salvar)
+        # Se já está consolidado (ambas catracas salvas), cria novo registro
         voo_existente = Embarque.objects.filter(
             flight_number=flight_number,
             departure_date=departure_date
+        ).exclude(
+            catraca1_salvo=True, catraca2_salvo=True
         ).first()
 
         if voo_existente:
