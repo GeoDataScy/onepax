@@ -3,6 +3,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.utils import timezone
+from datetime import timedelta
 from .models import Embarque, Desembarque
 from controle_acesso.models import Catraca, EventoCatraca
 import json
@@ -113,10 +114,13 @@ def api_salvar_embarque(request):
         passageiros = data.get('passengers_boarded', 0)
 
         # Busca registro pendente de consolidação (ainda falta uma catraca salvar)
-        # Se já está consolidado (ambas catracas salvas), cria novo registro
+        # Só considera registros criados nos últimos 15 minutos para evitar
+        # sobrescrever voos repetidos registrados horas/dias depois
+        limite_consolidacao = timezone.now() - timedelta(minutes=15)
         voo_existente = Embarque.objects.filter(
             flight_number=flight_number,
-            departure_date=departure_date
+            departure_date=departure_date,
+            created_at__gte=limite_consolidacao
         ).exclude(
             catraca1_salvo=True, catraca2_salvo=True
         ).first()
