@@ -9,4 +9,7 @@ urlpatterns = [
     path('dashboard/filtros/', views.dashboard_filtros, name='dashboard_filtros'),
     path('dashboard/passageiros/', views.dashboard_passageiros, name='dashboard_passageiros'),
     path('dashboard/operacional/', views.dashboard_operacional, name='dashboard_operacional'),
+    path('contatos-whatsapp/', views.contatos_whatsapp_list, name='contatos_whatsapp_list'),
+    path('contatos-whatsapp/<int:pk>/', views.contatos_whatsapp_detail, name='contatos_whatsapp_detail'),
+    path('relatorio-diario/', views.relatorio_diario, name='relatorio_diario'),
 ]

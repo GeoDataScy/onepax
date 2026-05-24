@@ -1,8 +1,10 @@
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework import status
 from controle_acesso.permissions import IsSuperintendente
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db.models import Sum, Count
 from datetime import date, timedelta
 from django.db.models.functions import TruncMonth, TruncWeek, TruncDate
@@ -15,6 +17,7 @@ from operacao_voo.models import Embarque, Desembarque
 from controle_acesso.models import EventoCatraca
 from sala_briefing.models import BriefingSession
 from transporte.models import RegistroTransporte
+from .models import ContatoWhatsapp
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,197 @@ def central_analise_status(request):
         'status': 'ok',
         'module': 'central_analise',
         'message': 'Módulo Central de Análise ativo',
+    })
+
+
+# =========================================================
+# CONTATOS WHATSAPP — CRUD
+# =========================================================
+
+def _serialize_contato(c: ContatoWhatsapp) -> dict:
+    return {
+        'id': c.id,
+        'nome': c.nome,
+        'telefone': c.telefone,
+        'ativo': c.ativo,
+        'criado_em': c.criado_em.isoformat(),
+        'atualizado_em': c.atualizado_em.isoformat(),
+    }
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated, IsSuperintendente])
+def contatos_whatsapp_list(request):
+    if request.method == 'GET':
+        contatos = ContatoWhatsapp.objects.all()
+        return Response([_serialize_contato(c) for c in contatos])
+
+    nome = (request.data.get('nome') or '').strip()
+    telefone = (request.data.get('telefone') or '').strip()
+    ativo = request.data.get('ativo', True)
+
+    if not nome or not telefone:
+        return Response(
+            {'detail': 'Nome e telefone são obrigatórios.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    contato = ContatoWhatsapp(nome=nome, telefone=telefone, ativo=bool(ativo))
+    try:
+        contato.full_clean()
+    except ValidationError as e:
+        return Response({'detail': e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
+
+    contato.save()
+    return Response(_serialize_contato(contato), status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated, IsSuperintendente])
+def contatos_whatsapp_detail(request, pk: int):
+    try:
+        contato = ContatoWhatsapp.objects.get(pk=pk)
+    except ContatoWhatsapp.DoesNotExist:
+        return Response({'detail': 'Contato não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        return Response(_serialize_contato(contato))
+
+    if request.method == 'DELETE':
+        contato.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # PUT/PATCH
+    if 'nome' in request.data:
+        contato.nome = (request.data.get('nome') or '').strip()
+    if 'telefone' in request.data:
+        contato.telefone = (request.data.get('telefone') or '').strip()
+    if 'ativo' in request.data:
+        contato.ativo = bool(request.data.get('ativo'))
+
+    try:
+        contato.full_clean()
+    except ValidationError as e:
+        return Response({'detail': e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
+
+    contato.save()
+    return Response(_serialize_contato(contato))
+
+
+# =========================================================
+# RELATÓRIO OPERACIONAL DIÁRIO
+# =========================================================
+
+_DIAS_SEMANA = ['segunda-feira', 'terça-feira', 'quarta-feira',
+                'quinta-feira', 'sexta-feira', 'sábado', 'domingo']
+_MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+          'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
+
+
+def _fmt_milhar(n: int) -> str:
+    return f"{int(n or 0):,}".replace(',', '.')
+
+
+def gerar_dados_relatorio_diario(data_alvo: date) -> dict:
+    """Consolida os dados operacionais do dia para o relatório."""
+    emb_qs = Embarque.objects.filter(departure_date=data_alvo)
+    des_qs = Desembarque.objects.filter(arrival_date=data_alvo)
+
+    total_emb_pax = emb_qs.aggregate(t=Sum('passengers_boarded'))['t'] or 0
+    total_des_pax = des_qs.aggregate(t=Sum('passengers_disembarked'))['t'] or 0
+    voos_emb = emb_qs.count()
+    voos_des = des_qs.count()
+
+    por_operadora: dict[str, int] = {}
+    for row in emb_qs.values('operadora').annotate(t=Sum('passengers_boarded')):
+        op = (row['operadora'] or 'Não informado').strip() or 'Não informado'
+        por_operadora[op] = por_operadora.get(op, 0) + (row['t'] or 0)
+    for row in des_qs.values('operadora').annotate(t=Sum('passengers_disembarked')):
+        op = (row['operadora'] or 'Não informado').strip() or 'Não informado'
+        por_operadora[op] = por_operadora.get(op, 0) + (row['t'] or 0)
+
+    por_cliente: dict[str, int] = {}
+    for row in emb_qs.values('cliente_final').annotate(t=Sum('passengers_boarded')):
+        cli = (row['cliente_final'] or 'Não informado').strip() or 'Não informado'
+        por_cliente[cli] = por_cliente.get(cli, 0) + (row['t'] or 0)
+    for row in des_qs.values('cliente_final').annotate(t=Sum('passengers_disembarked')):
+        cli = (row['cliente_final'] or 'Não informado').strip() or 'Não informado'
+        por_cliente[cli] = por_cliente.get(cli, 0) + (row['t'] or 0)
+
+    return {
+        'data': data_alvo.isoformat(),
+        'total_passageiros': total_emb_pax + total_des_pax,
+        'total_embarques_pax': total_emb_pax,
+        'total_desembarques_pax': total_des_pax,
+        'voos_embarque': voos_emb,
+        'voos_desembarque': voos_des,
+        'por_operadora': por_operadora,
+        'por_cliente_final': por_cliente,
+    }
+
+
+def formatar_relatorio_whatsapp(dados: dict) -> str:
+    """Renderiza o relatório em texto formatado para WhatsApp."""
+    data_obj = date.fromisoformat(dados['data'])
+    data_extenso = (
+        f"{_DIAS_SEMANA[data_obj.weekday()]}, "
+        f"{data_obj.day} de {_MESES[data_obj.month - 1]} de {data_obj.year}"
+    )
+
+    if dados['por_operadora']:
+        operadoras_lines = '\n'.join(
+            f"  • {op}: {_fmt_milhar(v)} pax"
+            for op, v in sorted(dados['por_operadora'].items(), key=lambda kv: -kv[1])
+        )
+    else:
+        operadoras_lines = '  • (sem registros)'
+
+    if dados['por_cliente_final']:
+        clientes_lines = '\n'.join(
+            f"  • {cli}: {_fmt_milhar(v)} pax"
+            for cli, v in sorted(dados['por_cliente_final'].items(), key=lambda kv: -kv[1])
+        )
+    else:
+        clientes_lines = '  • (sem registros)'
+
+    return (
+        f"*ONEPAX - Relatório Operacional Diário*\n"
+        f"_{data_extenso}_\n\n"
+        f"*Resumo Geral*\n"
+        f"Total de passageiros: {_fmt_milhar(dados['total_passageiros'])}\n"
+        f"Embarques: {_fmt_milhar(dados['total_embarques_pax'])} pax "
+        f"({dados['voos_embarque']} voos)\n"
+        f"Desembarques: {_fmt_milhar(dados['total_desembarques_pax'])} pax "
+        f"({dados['voos_desembarque']} voos)\n\n"
+        f"*Por Companhia Aérea*\n"
+        f"{operadoras_lines}\n\n"
+        f"*Por Cliente Final*\n"
+        f"{clientes_lines}\n\n"
+        f"_Relatório gerado automaticamente pelo sistema ONEPAX._"
+    )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsSuperintendente])
+def relatorio_diario(request):
+    data_param = request.query_params.get('data')
+    if data_param:
+        try:
+            data_alvo = date.fromisoformat(data_param)
+        except ValueError:
+            return Response(
+                {'detail': 'Parâmetro `data` inválido. Use formato YYYY-MM-DD.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    else:
+        data_alvo = date.today()
+
+    dados = gerar_dados_relatorio_diario(data_alvo)
+    texto = formatar_relatorio_whatsapp(dados)
+    return Response({
+        'data': dados['data'],
+        'texto': texto,
+        'dados': dados,
     })
 
 
