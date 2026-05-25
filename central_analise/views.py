@@ -6,18 +6,31 @@ from controle_acesso.permissions import IsSuperintendente
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Sum, Count
-from datetime import date, timedelta
+from django.http import HttpResponse
+from django.utils import timezone as djtimezone
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from django.db.models.functions import TruncMonth, TruncWeek, TruncDate
 from collections import OrderedDict
 import json
 import logging
+import tempfile
+from pathlib import Path
+
+BR_TZ = ZoneInfo('America/Sao_Paulo')
+
+
+def _br_today() -> date:
+    """Hoje no fuso de São Paulo. Necessário porque o Django roda em UTC
+    e operações são registradas em data local brasileira."""
+    return djtimezone.now().astimezone(BR_TZ).date()
 
 from openai import OpenAI
 from operacao_voo.models import Embarque, Desembarque
 from controle_acesso.models import EventoCatraca
 from sala_briefing.models import BriefingSession
 from transporte.models import RegistroTransporte
-from .models import ContatoWhatsapp
+from .models import ContatoWhatsapp, ConfiguracaoRelatorio
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +118,48 @@ def contatos_whatsapp_detail(request, pk: int):
 
     contato.save()
     return Response(_serialize_contato(contato))
+
+
+# =========================================================
+# CONFIGURAÇÃO DE RELATÓRIO (singleton)
+# =========================================================
+
+def _serialize_configuracao(c: ConfiguracaoRelatorio) -> dict:
+    return {
+        'horario_envio_diario': c.horario_envio_diario.strftime('%H:%M') if c.horario_envio_diario else None,
+        'atualizado_em': c.atualizado_em.isoformat(),
+    }
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated, IsSuperintendente])
+def configuracao_relatorio(request):
+    config = ConfiguracaoRelatorio.get_singleton()
+
+    if request.method == 'GET':
+        return Response(_serialize_configuracao(config))
+
+    # PATCH
+    if 'horario_envio_diario' in request.data:
+        valor = request.data.get('horario_envio_diario')
+        if valor in (None, '', 'null'):
+            config.horario_envio_diario = None
+        else:
+            # Aceita "HH:MM" ou "HH:MM:SS"
+            from datetime import time as dttime
+            try:
+                partes = str(valor).split(':')
+                hh = int(partes[0])
+                mm = int(partes[1]) if len(partes) > 1 else 0
+                config.horario_envio_diario = dttime(hh, mm)
+            except (ValueError, IndexError):
+                return Response(
+                    {'detail': 'Horário inválido. Use formato HH:MM.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+    config.save()
+    return Response(_serialize_configuracao(config))
 
 
 # =========================================================
@@ -213,7 +268,7 @@ def relatorio_diario(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
     else:
-        data_alvo = date.today()
+        data_alvo = _br_today()
 
     dados = gerar_dados_relatorio_diario(data_alvo)
     texto = formatar_relatorio_whatsapp(dados)
@@ -221,6 +276,87 @@ def relatorio_diario(request):
         'data': dados['data'],
         'texto': texto,
         'dados': dados,
+    })
+
+
+# =========================================================
+# RELATÓRIO MENSAL (PDF)
+# =========================================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsSuperintendente])
+def relatorio_mensal_pdf(request):
+    from .relatorio_mensal import gerar_dados_relatorio_mensal, mes_extenso
+    from .pdf_generator import gerar_pdf_relatorio_mensal
+
+    hoje = _br_today()
+    # Default: mês anterior
+    if hoje.month == 1:
+        default_ano, default_mes = hoje.year - 1, 12
+    else:
+        default_ano, default_mes = hoje.year, hoje.month - 1
+
+    try:
+        ano = int(request.query_params.get('ano', default_ano))
+        mes = int(request.query_params.get('mes', default_mes))
+    except (TypeError, ValueError):
+        return Response(
+            {'detail': 'Parâmetros `ano` e `mes` devem ser inteiros.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if mes < 1 or mes > 12:
+        return Response(
+            {'detail': 'Mês deve estar entre 1 e 12.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    dados = gerar_dados_relatorio_mensal(ano, mes)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pdf_bytes = gerar_pdf_relatorio_mensal(dados, Path(tmpdir))
+
+    filename = f"onepax_relatorio_{ano}_{mes:02d}.pdf"
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response['X-Onepax-Mes-Extenso'] = mes_extenso(ano, mes)
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsSuperintendente])
+def relatorio_mensal_resumo(request):
+    """Endpoint leve: retorna só os insights (sem gerar PDF). Útil pra montar
+    a mensagem WhatsApp que acompanha o anexo."""
+    from .relatorio_mensal import gerar_dados_relatorio_mensal, mes_extenso
+
+    hoje = _br_today()
+    if hoje.month == 1:
+        default_ano, default_mes = hoje.year - 1, 12
+    else:
+        default_ano, default_mes = hoje.year, hoje.month - 1
+
+    try:
+        ano = int(request.query_params.get('ano', default_ano))
+        mes = int(request.query_params.get('mes', default_mes))
+    except (TypeError, ValueError):
+        return Response(
+            {'detail': 'Parâmetros inválidos.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    dados = gerar_dados_relatorio_mensal(ano, mes)
+    return Response({
+        'ano': ano,
+        'mes': mes,
+        'mes_extenso': mes_extenso(ano, mes),
+        'totais': dados['totais'],
+        'comparativo': {
+            'mes_anterior_extenso': dados['comparativo']['mes_anterior_extenso'],
+            'delta_pax_pct': dados['comparativo']['delta_pax_pct'],
+            'delta_voos_pct': dados['comparativo']['delta_voos_pct'],
+        },
+        'insights': dados['insights'],
     })
 
 

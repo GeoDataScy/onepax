@@ -52,3 +52,32 @@ class ContatoWhatsapp(models.Model):
     def __str__(self):
         status = "ativo" if self.ativo else "inativo"
         return f"{self.nome} ({self.telefone}) [{status}]"
+
+
+class ConfiguracaoRelatorio(models.Model):
+    """
+    Singleton: configurações globais do envio de relatórios.
+    Sempre acessado via ConfiguracaoRelatorio.get_singleton().
+    """
+    horario_envio_diario = models.TimeField(
+        null=True, blank=True,
+        verbose_name="Horário do envio diário (BRT)",
+        help_text="Horário em que o relatório diário deve ser enviado. Sem função até o cron estar ativo.",
+    )
+    atualizado_em = models.DateTimeField(auto_now=True, verbose_name="Atualizado em")
+
+    class Meta:
+        verbose_name = "Configuração de Relatório"
+        verbose_name_plural = "Configurações de Relatório"
+
+    def __str__(self):
+        return f"Config (horário={self.horario_envio_diario})"
+
+    @classmethod
+    def get_singleton(cls) -> "ConfiguracaoRelatorio":
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)

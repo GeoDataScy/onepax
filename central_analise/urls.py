@@ -12,4 +12,7 @@ urlpatterns = [
     path('contatos-whatsapp/', views.contatos_whatsapp_list, name='contatos_whatsapp_list'),
     path('contatos-whatsapp/<int:pk>/', views.contatos_whatsapp_detail, name='contatos_whatsapp_detail'),
     path('relatorio-diario/', views.relatorio_diario, name='relatorio_diario'),
+    path('relatorio-mensal/', views.relatorio_mensal_pdf, name='relatorio_mensal_pdf'),
+    path('relatorio-mensal-resumo/', views.relatorio_mensal_resumo, name='relatorio_mensal_resumo'),
+    path('configuracao/', views.configuracao_relatorio, name='configuracao_relatorio'),
 ]
