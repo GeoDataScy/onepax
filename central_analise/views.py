@@ -176,6 +176,41 @@ def _fmt_milhar(n: int) -> str:
     return f"{int(n or 0):,}".replace(',', '.')
 
 
+# Normaliza nomes inconsistentes do banco (acentos, caixa, typos) para os
+# nomes canônicos completos exibidos no relatório do WhatsApp.
+_NOME_MAPA = {
+    'bristow taxi aereo': 'Bristow Táxi Aéreo',
+    'bristow táxi aéreo': 'Bristow Táxi Aéreo',
+    'bristow táxi aereo': 'Bristow Táxi Aéreo',
+    'bristow': 'Bristow Táxi Aéreo',
+    'lider taxi aereo': 'Líder Táxi Aéreo',
+    'lider táxi aéreo': 'Líder Táxi Aéreo',
+    'lider taxi aéreo': 'Líder Táxi Aéreo',
+    'líder táxi aéreo': 'Líder Táxi Aéreo',
+    'lidder taxi aereo': 'Líder Táxi Aéreo',
+    'lider': 'Líder Táxi Aéreo',
+    'chc taxi aereo': 'CHC Táxi Aéreo',
+    'chc táxi aéreo': 'CHC Táxi Aéreo',
+    'chc táxi aereo': 'CHC Táxi Aéreo',
+    'chc': 'CHC Táxi Aéreo',
+    'omni taxi aereo': 'Omni Táxi Aéreo',
+    'omni táxi aéreo': 'Omni Táxi Aéreo',
+    'omni': 'Omni Táxi Aéreo',
+    'petrobras': 'Petrobras',
+    'prio': 'Prio',
+    'spot': 'Spot',
+}
+
+
+def _normalizar_nome(nome: str | None) -> str:
+    if not nome:
+        return 'Não informado'
+    chave = nome.strip()
+    if not chave:
+        return 'Não informado'
+    return _NOME_MAPA.get(chave.lower(), chave)
+
+
 def gerar_dados_relatorio_diario(data_alvo: date) -> dict:
     """Consolida os dados operacionais do dia para o relatório."""
     emb_qs = Embarque.objects.filter(departure_date=data_alvo)
@@ -186,25 +221,28 @@ def gerar_dados_relatorio_diario(data_alvo: date) -> dict:
     voos_emb = emb_qs.count()
     voos_des = des_qs.count()
 
-    por_operadora: dict[str, int] = {}
-    for row in emb_qs.values('operadora').annotate(t=Sum('passengers_boarded')):
-        op = (row['operadora'] or 'Não informado').strip() or 'Não informado'
-        por_operadora[op] = por_operadora.get(op, 0) + (row['t'] or 0)
-    for row in des_qs.values('operadora').annotate(t=Sum('passengers_disembarked')):
-        op = (row['operadora'] or 'Não informado').strip() or 'Não informado'
-        por_operadora[op] = por_operadora.get(op, 0) + (row['t'] or 0)
+    def _acumular(destino: dict, chave: str | None, pax, voos) -> None:
+        nome = _normalizar_nome(chave)
+        bucket = destino.setdefault(nome, {'pax': 0, 'voos': 0})
+        bucket['pax'] += pax or 0
+        bucket['voos'] += voos or 0
 
-    por_cliente: dict[str, int] = {}
-    for row in emb_qs.values('cliente_final').annotate(t=Sum('passengers_boarded')):
-        cli = (row['cliente_final'] or 'Não informado').strip() or 'Não informado'
-        por_cliente[cli] = por_cliente.get(cli, 0) + (row['t'] or 0)
-    for row in des_qs.values('cliente_final').annotate(t=Sum('passengers_disembarked')):
-        cli = (row['cliente_final'] or 'Não informado').strip() or 'Não informado'
-        por_cliente[cli] = por_cliente.get(cli, 0) + (row['t'] or 0)
+    por_operadora: dict[str, dict] = {}
+    for row in emb_qs.values('operadora').annotate(pax=Sum('passengers_boarded'), voos=Count('id')):
+        _acumular(por_operadora, row['operadora'], row['pax'], row['voos'])
+    for row in des_qs.values('operadora').annotate(pax=Sum('passengers_disembarked'), voos=Count('id')):
+        _acumular(por_operadora, row['operadora'], row['pax'], row['voos'])
+
+    por_cliente: dict[str, dict] = {}
+    for row in emb_qs.values('cliente_final').annotate(pax=Sum('passengers_boarded'), voos=Count('id')):
+        _acumular(por_cliente, row['cliente_final'], row['pax'], row['voos'])
+    for row in des_qs.values('cliente_final').annotate(pax=Sum('passengers_disembarked'), voos=Count('id')):
+        _acumular(por_cliente, row['cliente_final'], row['pax'], row['voos'])
 
     return {
         'data': data_alvo.isoformat(),
         'total_passageiros': total_emb_pax + total_des_pax,
+        'total_voos': voos_emb + voos_des,
         'total_embarques_pax': total_emb_pax,
         'total_desembarques_pax': total_des_pax,
         'voos_embarque': voos_emb,
@@ -222,36 +260,31 @@ def formatar_relatorio_whatsapp(dados: dict) -> str:
         f"{data_obj.day} de {_MESES[data_obj.month - 1]} de {data_obj.year}"
     )
 
-    if dados['por_operadora']:
-        operadoras_lines = '\n'.join(
-            f"  • {op}: {_fmt_milhar(v)} pax"
-            for op, v in sorted(dados['por_operadora'].items(), key=lambda kv: -kv[1])
+    def _linhas(grupo: dict) -> str:
+        if not grupo:
+            return '  • (sem registros)'
+        return '\n'.join(
+            f"  • {nome}: {_fmt_milhar(v['pax'])} pax ({v['voos']} voos)"
+            for nome, v in sorted(grupo.items(), key=lambda kv: -kv[1]['pax'])
         )
-    else:
-        operadoras_lines = '  • (sem registros)'
 
-    if dados['por_cliente_final']:
-        clientes_lines = '\n'.join(
-            f"  • {cli}: {_fmt_milhar(v)} pax"
-            for cli, v in sorted(dados['por_cliente_final'].items(), key=lambda kv: -kv[1])
-        )
-    else:
-        clientes_lines = '  • (sem registros)'
+    operadoras_lines = _linhas(dados['por_operadora'])
+    clientes_lines = _linhas(dados['por_cliente_final'])
 
     return (
         f"*ONEPAX - Relatório Operacional Diário*\n"
         f"_{data_extenso}_\n\n"
         f"*Resumo Geral*\n"
         f"Total de passageiros: {_fmt_milhar(dados['total_passageiros'])}\n"
+        f"Total de voos: {_fmt_milhar(dados['total_voos'])}\n"
         f"Embarques: {_fmt_milhar(dados['total_embarques_pax'])} pax "
-        f"({dados['voos_embarque']} voos)\n"
+        f"({dados['voos_embarque']} Decolagens)\n"
         f"Desembarques: {_fmt_milhar(dados['total_desembarques_pax'])} pax "
-        f"({dados['voos_desembarque']} voos)\n\n"
+        f"({dados['voos_desembarque']} Pousos)\n\n"
         f"*Por Companhia Aérea*\n"
         f"{operadoras_lines}\n\n"
         f"*Por Cliente Final*\n"
-        f"{clientes_lines}\n\n"
-        f"_Relatório gerado automaticamente pelo sistema ONEPAX._"
+        f"{clientes_lines}"
     )
 
 
@@ -1086,9 +1119,9 @@ def _apply_operacional_filters_emb(qs, params):
     if clientes:
         qs = qs.filter(cliente_final__in=clientes)
 
-    icaos = _parse_multi(params.get('icao'))
-    if icaos:
-        qs = qs.filter(icao__in=icaos)
+    aeronaves = _parse_multi(params.get('aeronave'))
+    if aeronaves:
+        qs = qs.filter(aeronave__in=aeronaves)
 
     return qs
 
@@ -1106,9 +1139,9 @@ def _apply_operacional_filters_des(qs, params):
     if clientes:
         qs = qs.filter(cliente_final__in=clientes)
 
-    icaos = _parse_multi(params.get('icao'))
-    if icaos:
-        qs = qs.filter(icao__in=icaos)
+    aeronaves = _parse_multi(params.get('aeronave'))
+    if aeronaves:
+        qs = qs.filter(aeronave__in=aeronaves)
 
     return qs
 
